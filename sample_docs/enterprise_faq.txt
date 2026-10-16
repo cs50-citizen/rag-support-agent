@@ -1,0 +1,21 @@
+[Corporate Travel & Reimbursement Policy / 公司差旅与报销制度]
+1. Daily Meal Allowance: Employees traveling to Tier-1 metropolitan areas (e.g., Shanghai, Beijing) are entitled to a daily meal subsidy of up to 150 RMB ($22 USD); Tier-2/3 cities up to 100 RMB. No receipts required, but travel attendance logs must be verified.
+(每日餐饮补贴标准：国内一线城市出差每人每天最高可报销 150 元，二三线城市最高可报销 100 元，无需发票但需提供出差打卡记录。)
+2. Transportation Standards: High-speed rail second-class is preferred for journeys under 5 hours. Economy-class flights are permitted for cross-continental travel or journeys exceeding 5 hours.
+(交通工具选择：单程高铁耗时在 5 小时以内的优先选择高铁二等座；超过 5 小时或跨国出差方可申请购买经济舱机票。)
+3. Expense Report Deadline: Expense claims must be submitted via the corporate OA portal within 14 calendar days post-trip.
+(报销提交时效：员工必须在出差行程结束后 14 个自然日内通过 OA 系统提交报销审批，逾期系统将自动归档不再受理。)
+
+[IT Security & Infrastructure Regulations / IT 设施与信息安全规定]
+1. Visitor Wi-Fi Credentials: The guest Wi-Fi password rotates every Monday at 9:00 AM UTC. Please contact the front desk or IT service desk.
+(访客 WiFi 密码每逢周一早晨 9:00 自动更换，当前访客密码可联系前台或通过企业服务台获取。)
+2. Screen Lock Policy: Workstations must be locked (Win + L or Cmd + Ctrl + Q) whenever left unattended for more than 3 minutes.
+(员工离岗离开工位超过 3 分钟必须锁定电脑屏幕。)
+3. Production Database Access: Direct connections to production databases are strictly prohibited. Access must be routed through JumpServer with Multi-Factor Authentication (MFA).
+(数据库与生产环境禁止直接直连，必须通过堡垒机并进行 MFA 验证登录。)
+
+[Paid Time Off & Employee Benefits / 休假与人事福利]
+1. Annual Leave (PTO): Employees with 1 full year of tenure receive 5 paid annual leave days; 3+ years receive 10 days; 5+ years receive 15 days. Unused PTO can be converted to salary or carried over to Q1 next year.
+(年假政策：入职满 1 年享 5 天带薪年假，满 3 年享 10 天，满 5 年享 15 天。)
+2. Birthday Privilege: Employees receive 1 paid birthday leave day in their birth month and a 200 RMB gift card.
+(生日福利：员工生日当月可享有专属生日带薪假 1 天，并获赠 200 元礼品卡。)

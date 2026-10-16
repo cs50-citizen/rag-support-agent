@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enterprise RAG Knowledge Base & Support Agent</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & ReactDOM CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    @keyframes pulse-slow { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .animate-pulse-slow { animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .cursor-blink { display: inline-block; width: 6px; height: 16px; background-color: #3b82f6; vertical-align: text-bottom; animation: pulse-slow 1s infinite; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans antialiased min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    function App() {
+      // State Management
+      const [tenantId, setTenantId] = useState("tenant_default");
+      const [user, setUser] = useState({ username: "Enterprise Admin / 管理员", role: "admin", token: "" });
+      const [messages, setMessages] = useState([
+        {
+          sender: "agent",
+          text: "Hello! I am your Enterprise RAG Knowledge Base & Autonomous Support Agent. The system is fully initialized with multi-tenant data isolation and context pruning enabled. Feel free to query corporate policies or upload documents!\n\n(您好！我是企业智能知识库与业务支持 Agent。系统已就绪，已挂载多租户隔离与上下文降噪引擎，请随时提问或上传文档！)",
+          intent: "CHITCHAT",
+          references: []
+        }
+      ]);
+      const [inputQuery, setInputQuery] = useState("");
+      const [isStreaming, setIsStreaming] = useState(false);
+
+      // Async Document Ingestion & Celery Task Monitoring
+      const [docTitle, setDocTitle] = useState("");
+      const [docContent, setDocContent] = useState("");
+      const [taskProgress, setTaskProgress] = useState(null); // { state, progress, step }
+      const [isUploading, setIsUploading] = useState(false);
+
+      const messagesEndRef = useRef(null);
+
+      const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      };
+
+      useEffect(() => {
+        scrollToBottom();
+      }, [messages]);
+
+      // Handle SSE Stream Query
+      const handleSend = async (overrideQuery = null) => {
+        const query = overrideQuery || inputQuery;
+        if (!query.trim() || isStreaming) return;
+
+        setInputQuery("");
+        setIsStreaming(true);
+
+        // Add user message
+        setMessages(prev => [...prev, { sender: "user", text: query }]);
+
+        // Prepend placeholder AI message
+        setMessages(prev => [
+          ...prev,
+          {
+            sender: "agent",
+            text: "",
+            intent: null,
+            intentReason: "",
+            compression: null,
+            references: [],
+            isThinking: true
+          }
+        ]);
+
+        try {
+          const response = await fetch("/api/v1/chat/stream", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(user.token ? { "Authorization": `Bearer ${user.token}` } : {})
+            },
+            body: JSON.stringify({ query: query, tenant_id: tenantId })
+          });
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let accumulatedText = "";
+          let buffer = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop(); // Keep incomplete line
+
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.event === "intent") {
+                    setMessages(prev => {
+                      const updated = [...prev];
+                      updated[updated.length - 1].intent = data.intent;
+                      updated[updated.length - 1].intentReason = data.reason;
+                      return updated;
+                    });
+                  } else if (data.event === "compression") {
+                    setMessages(prev => {
+                      const updated = [...prev];
+                      updated[updated.length - 1].compression = data.stats;
+                      return updated;
+                    });
+                  } else if (data.event === "token") {
+                    accumulatedText += data.text;
+                    setMessages(prev => {
+                      const updated = [...prev];
+                      const last = updated[updated.length - 1];
+                      last.text = accumulatedText;
+                      last.isThinking = false;
+                      return updated;
+                    });
+                  } else if (data.event === "done") {
+                    setMessages(prev => {
+                      const updated = [...prev];
+                      const last = updated[updated.length - 1];
+                      last.references = data.references || [];
+                      last.isThinking = false;
+                      return updated;
+                    });
+                  }
+                } catch (e) {
+                  console.error("SSE parse error", e);
+                }
+              }
+            }
+          }
+        } catch (error) {
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1].text = `Connection failed / 连接失败: ${error.message}`;
+            updated[updated.length - 1].isThinking = false;
+            return updated;
+          });
+        } finally {
+          setIsStreaming(false);
+        }
+      };
+
+      // Handle Document Upload via Celery Async Queue
+      const handleUpload = async () => {
+        if (!docTitle.trim() || !docContent.trim() || isUploading) return;
+        setIsUploading(true);
+        setTaskProgress({ state: "PENDING", progress: 5, step: "Submitting to Celery task queue / 正在提交至任务队列..." });
+
+        try {
+          const res = await fetch("/api/v1/documents/upload", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(user.token ? { "Authorization": `Bearer ${user.token}` } : {})
+            },
+            body: JSON.stringify({
+              filename: docTitle,
+              content: docContent,
+              tenant_id: tenantId
+            })
+          });
+
+          if (res.status !== 202) {
+            throw new Error(`Upload failed with status / 上传失败: ${res.status}`);
+          }
+
+          const { task_id } = await res.json();
+
+          // Poll Celery task status
+          const pollInterval = setInterval(async () => {
+            try {
+              const taskRes = await fetch(`/api/v1/documents/tasks/${task_id}`);
+              const taskData = await taskRes.json();
+              setTaskProgress({
+                state: taskData.state,
+                progress: taskData.progress || 50,
+                step: taskData.step || "Processing / 处理中..."
+              });
+
+              if (taskData.state === "SUCCESS" || taskData.state === "FAILURE") {
+                clearInterval(pollInterval);
+                setIsUploading(false);
+                if (taskData.state === "SUCCESS") {
+                  setDocTitle("");
+                  setDocContent("");
+                  setMessages(prev => [
+                    ...prev,
+                    {
+                      sender: "agent",
+                      text: `🎉 Document 《${docTitle}》 has been ingested & indexed asynchronously via Celery! Vector embeddings are ready for querying.\n(文档《${docTitle}》已由 Celery 异步切片完成入库，现可开始就该文档提问！)`,
+                      intent: "KNOWLEDGE_QUERY",
+                      references: []
+                    }
+                  ]);
+                }
+              }
+            } catch (err) {
+              clearInterval(pollInterval);
+              setIsUploading(false);
+            }
+          }, 800);
+        } catch (err) {
+          alert(`Upload error / 上传失败: ${err.message}`);
+          setIsUploading(false);
+          setTaskProgress(null);
+        }
+      };
+
+      return (
+        <div className="flex h-screen overflow-hidden">
+          {/* Left Sidebar: Multi-Tenant Scopes & Celery Async Ingestion */}
+          <aside className="w-84 bg-slate-950 border-r border-slate-800 flex flex-col p-4 space-y-5">
+            {/* Logo & Platform Title */}
+            <div className="flex items-center space-x-2.5">
+              <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/30">
+                R
+              </div>
+              <div>
+                <h1 className="font-bold text-sm tracking-wide text-white">Enterprise RAG</h1>
+                <p className="text-[11px] text-slate-400">Multi-Tenant Agent Platform / 多租户系统</p>
+              </div>
+            </div>
+
+            {/* Tenant Scope Selector */}
+            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+              <label className="text-xs font-semibold text-slate-300 block mb-2">
+                Tenant Isolation Scope / 租户数据隔离空间
+              </label>
+              <select
+                value={tenantId}
+                onChange={e => setTenantId(e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 text-xs rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="tenant_default">🏢 Corporate Public / 通用公开制度 (tenant_default)</option>
+                <option value="corp_finance">💰 Confidential Finance / 财务绝密空间 (corp_finance)</option>
+                <option value="corp_tech">💻 Engineering & Tech / 研发规范空间 (corp_tech)</option>
+              </select>
+              <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+                🔒 pgvector enforces strict row-level isolation by <code>tenant_id</code> to safeguard corporate confidential data (严格物理/逻辑隔离，杜绝越权泄露).
+              </p>
+            </div>
+
+            {/* Celery Async Upload Panel */}
+            <div className="flex-1 bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col space-y-3 overflow-y-auto">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200">⚡ Async Ingestion / 异步入库 (Celery)</span>
+                <span className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded-full border border-blue-700 font-mono">HTTP 202</span>
+              </div>
+              <input
+                type="text"
+                placeholder="Document Title / 文档标题 (e.g. travel_policy.txt)"
+                value={docTitle}
+                onChange={e => setDocTitle(e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 text-xs rounded-lg p-2 text-white focus:outline-none focus:border-blue-500"
+              />
+              <textarea
+                placeholder="Paste corporate policy contents (automatic chunking & vector indexing pipeline)... / 粘贴企业规章长文本..."
+                value={docContent}
+                onChange={e => setDocContent(e.target.value)}
+                rows={4}
+                className="w-full bg-slate-800 border border-slate-700 text-xs rounded-lg p-2 text-white resize-none focus:outline-none focus:border-blue-500"
+              />
+              <button
+                onClick={handleUpload}
+                disabled={isUploading || !docTitle || !docContent}
+                className={`w-full py-2 px-3 rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-1 ${
+                  isUploading || !docTitle || !docContent
+                    ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/30"
+                }`}
+              >
+                <span>{isUploading ? "Ingesting in Background / 任务排队中..." : "Submit to Celery / 提交异步入库"}</span>
+              </button>
+
+              {/* Task Progress Bar */}
+              {taskProgress && (
+                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700 text-xs space-y-1.5 animate-fadeIn">
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="font-semibold text-blue-400">{taskProgress.state}</span>
+                    <span className="text-slate-400">{taskProgress.progress}%</span>
+                  </div>
+                  <div className="w-full bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                    <div
+                      className="bg-blue-500 h-full transition-all duration-300"
+                      style={{ width: `${taskProgress.progress}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400 truncate">{taskProgress.step}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Architecture Details Footer */}
+            <div className="text-[11px] text-slate-400 border-t border-slate-800/80 pt-3 space-y-1">
+              <div>⚙️ <b>Architecture</b>: FastAPI, pgvector, Celery, Redis</div>
+              <div>⚡ <b>Interface</b>: React 18, SSE Stream (Server-Sent Events)</div>
+            </div>
+          </aside>
+
+          {/* Right Main Chat Interface */}
+          <main className="flex-1 flex flex-col bg-slate-900">
+            {/* Top Navigation Bar */}
+            <header className="h-14 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-6">
+              <div className="flex items-center space-x-3">
+                <span className="flex h-2.5 w-2.5 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <span className="text-xs font-semibold text-slate-300">
+                  Active Tenant Space / 当前空间: <span className="text-blue-400 font-mono">[{tenantId}]</span>
+                </span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs text-slate-400">User / 身份: <b>{user.username}</b></span>
+                <span className="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-700 px-2 py-0.5 rounded font-mono">
+                  {user.role}
+                </span>
+              </div>
+            </header>
+
+            {/* Chat Message Stream */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {messages.map((msg, i) => (
+                <div
+                  key={i}
+                  className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`max-w-2xl rounded-2xl p-4 space-y-2.5 leading-relaxed shadow-sm ${
+                      msg.sender === "user"
+                        ? "bg-blue-600 text-white"
+                        : "bg-slate-800/90 border border-slate-700 text-slate-100"
+                    }`}
+                  >
+                    {/* Agent Message Header Badges */}
+                    {msg.sender === "agent" && (msg.intent || msg.compression) && (
+                      <div className="flex flex-wrap gap-2 text-[10px] pb-1 border-b border-slate-700/60">
+                        {msg.intent && (
+                          <span className={`px-2 py-0.5 rounded font-semibold ${
+                            msg.intent === "CHITCHAT"
+                              ? "bg-purple-950 text-purple-300 border border-purple-800"
+                              : msg.intent === "ACTION_TOOL"
+                              ? "bg-amber-950 text-amber-300 border border-amber-800"
+                              : "bg-blue-950 text-blue-300 border border-blue-800"
+                          }`}>
+                            {msg.intent === "CHITCHAT" && "💬 Direct Chitchat (0 DB queries) / 快速闲聊"}
+                            {msg.intent === "ACTION_TOOL" && "⚡ Agent Workflow Ticket / 业务办理工单"}
+                            {msg.intent === "KNOWLEDGE_QUERY" && "📚 Knowledge Vector Retrieval / 知识库向量检索"}
+                          </span>
+                        )}
+                        {msg.compression && (
+                          <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-semibold">
+                            🚀 Context Pruning: Saved {msg.compression.saved_pct} Redundant Tokens / 已精简
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Message Body */}
+                    <div className="whitespace-pre-wrap text-sm">
+                      {msg.text}
+                      {msg.isThinking && <span className="cursor-blink ml-1"></span>}
+                    </div>
+
+                    {/* Evidence References Card */}
+                    {msg.references && msg.references.length > 0 && (
+                      <div className="mt-3 pt-2.5 border-t border-slate-700/60 text-xs">
+                        <span className="text-slate-400 font-semibold block mb-1">
+                          📖 Evidence References / 溯源引用资料:
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {msg.references.map((ref, idx) => (
+                            <span
+                              key={idx}
+                              className="bg-slate-900 border border-slate-700 px-2 py-1 rounded text-slate-300 text-[11px]"
+                            >
+                              📄 {ref.source} (Confidence / 置信度: {ref.score})
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Quick Interactive Prompt Chips */}
+            <div className="px-6 py-2 border-t border-slate-800/50 flex space-x-2 overflow-x-auto text-xs">
+              <span className="text-slate-400 self-center text-[11px] whitespace-nowrap">
+                💡 Quick Prompts / 快捷测试:
+              </span>
+              <button
+                onClick={() => handleSend("What is the daily meal allowance for business trips to Tier-1 cities like Shanghai? (去上海出差的一天餐饮补贴是多少？)")}
+                className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 py-1 rounded-full whitespace-nowrap transition"
+              >
+                Travel Meal Allowance / 出差餐饮补贴
+              </button>
+              <button
+                onClick={() => handleSend("Submit an official request for next Wednesday's paid annual leave (帮我申请下周三的带薪年假休假审批)")}
+                className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 py-1 rounded-full whitespace-nowrap transition"
+              >
+                PTO Leave Approval / 申请请假工单 (Agent Action)
+              </button>
+              <button
+                onClick={() => handleSend("What is the year-end bonus calculation base for corporate finance? (请问财务年终奖发放细则和计算基数是多少？)")}
+                className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 py-1 rounded-full whitespace-nowrap transition"
+              >
+                Finance Bonus / 财务年终奖 (Tenant Isolation Check)
+              </button>
+            </div>
+
+            {/* Chat Input Bar */}
+            <div className="p-4 bg-slate-950 border-t border-slate-800">
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  handleSend();
+                }}
+                className="flex items-center space-x-3 max-w-4xl mx-auto"
+              >
+                <input
+                  type="text"
+                  value={inputQuery}
+                  onChange={e => setInputQuery(e.target.value)}
+                  placeholder="Ask corporate policies or issue workflow directives (supports real-time SSE streaming)... / 向知识库提问或下达业务指令..."
+                  disabled={isStreaming}
+                  className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                />
+                <button
+                  type="submit"
+                  disabled={isStreaming || !inputQuery.trim()}
+                  className={`px-5 py-3 rounded-xl text-sm font-semibold transition ${
+                    isStreaming || !inputQuery.trim()
+                      ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/30"
+                  }`}
+                >
+                  {isStreaming ? "Streaming / 生成中..." : "Send / 发送"}
+                </button>
+              </form>
+            </div>
+          </main>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
