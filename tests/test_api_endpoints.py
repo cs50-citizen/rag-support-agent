@@ -7,7 +7,7 @@ def test_health_check(client):
     assert res.json()["status"] == "healthy"
 
 def test_auth_workflow(client):
-    # 注册
+    # Register
     reg_data = {
         "username": "pytest_user",
         "email": "pytest@enterprise.com",
@@ -17,7 +17,7 @@ def test_auth_workflow(client):
     }
     client.post("/api/v1/auth/register", json=reg_data)
 
-    # 登录
+    # Login
     login_res = client.post("/api/v1/auth/login", json={
         "username": "pytest_user",
         "password": "Password123!"
@@ -26,14 +26,14 @@ def test_auth_workflow(client):
     token = login_res.json()["access_token"]
     assert len(token) > 20
 
-    # 身份认证
+    # Verify Profile
     me_res = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me_res.status_code == 200
     assert me_res.json()["username"] == "pytest_user"
 
 def test_chat_stream_sse(client):
     req_body = {
-        "query": "你好",
+        "query": "Hello there!",
         "tenant_id": "tenant_default"
     }
     res = client.post("/api/v1/chat/stream", json=req_body)
@@ -44,7 +44,7 @@ def test_chat_stream_sse(client):
 def test_async_document_upload_and_status(client):
     payload = {
         "filename": "pytest_doc.txt",
-        "content": "[pytest 测试规章]\n全员需严格编写自动化单元测试并维持 80% 覆盖率。",
+        "content": "[pytest Testing Policy]\nAll engineering personnel must maintain 80% automated unit test coverage.",
         "tenant_id": "tenant_default"
     }
     upload_res = client.post("/api/v1/documents/upload", json=payload)
@@ -52,8 +52,7 @@ def test_async_document_upload_and_status(client):
     data = upload_res.json()
     task_id = data["task_id"]
 
-    # 查询任务状态
+    # Poll task status
     task_res = client.get(f"/api/v1/documents/tasks/{task_id}")
     assert task_res.status_code == 200
     assert task_res.json()["state"] in ["PROCESSING", "SUCCESS"]
-

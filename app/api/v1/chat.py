@@ -7,19 +7,29 @@ from app.services.rag_service import rag_service
 router = APIRouter()
 
 class ChatRequest(BaseModel):
-    query: str = Field(..., example="我出差去上海，餐饮补贴每天多少钱？", description="用户问题")
-    tenant_id: str = Field("tenant_default", example="corp_finance", description="多租户隔离标识")
+    query: str = Field(
+        ...,
+        json_schema_extra={"example": "What is the daily meal allowance for business trips to Tier-1 cities?"},
+        description="User query string"
+    )
+    tenant_id: str = Field(
+        "tenant_default",
+        json_schema_extra={"example": "tenant_default"},
+        description="Multi-tenant isolation identifier"
+    )
 
-@router.post("/chat/stream", summary="SSE 流式打字机问答接口")
+@router.post("/chat/stream", summary="SSE Streaming Typewriter Endpoint")
 async def chat_stream(request: ChatRequest):
     """
-    ## Server-Sent Events (SSE) 流式问答接口
-    - **请求方式**: POST
-    - **响应媒体类型**: `text/event-stream`
-    - **数据事件**:
-      - `retrieving`: 正在检索知识库
-      - `token`: 单个字符/Token打字机流式增量
-      - `done`: 回答完成，返回参考资料来源
+    ## Server-Sent Events (SSE) Streaming Chat Endpoint
+    - **Method**: POST
+    - **Media Type**: `text/event-stream`
+    - **Lifecycle Events**:
+      - `intent`: Pre-filtering classification (`CHITCHAT`, `ACTION_TOOL`, `KNOWLEDGE_QUERY`)
+      - `retrieving`: Searching multi-tenant vector chunks
+      - `compression`: Context pruning token reduction stats
+      - `token`: Incremental typewriter character/token chunks
+      - `done`: Finalization event with evidence references
     """
     generator = rag_service.stream_rag_answer(
         query=request.query,
@@ -31,7 +41,6 @@ async def chat_stream(request: ChatRequest):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # 关键：告知 Nginx 代理不要对流进行缓冲，实现真正的实时流
+            "X-Accel-Buffering": "no"  # Critical: Disables reverse proxy stream buffering (e.g. Nginx)
         }
     )
-

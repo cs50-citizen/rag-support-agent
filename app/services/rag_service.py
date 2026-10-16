@@ -69,13 +69,11 @@ class RAGService:
                     })
                 await repo.save_chunks("tenant_default", doc1.id, chunks_data1)
 
-            # 播种特定私有数据到 corp_finance 租户 (Bilingual English-first)
+            # Seed specific confidential records to corp_finance tenant
             finance_text = (
-                "[Confidential Finance Policies & Year-End Bonus Regulations / 财务机密制度与年终奖细则]\n"
-                "1. Year-End Bonus: Finance department bonus calculation base is 3.5 months base salary, disbursed on the last business day of January. "
-                "(财务部门年终奖计算基数为 3.5 个月全薪，每年 1 月最后一个工作日发放。)\n"
-                "2. Confidentiality: Payroll and bonus records are strictly confidential trade secrets. Disclosure to unauthorized departments is strictly prohibited. "
-                "(薪酬属于绝密级商业机密，严禁向其他任何部门泄露，违者解除劳动合同。)"
+                "[Confidential Finance Policies & Year-End Bonus Regulations]\n"
+                "1. Year-End Bonus: The annual bonus calculation base for the finance department is 3.5 months of base salary, distributed on the final business day of January.\n"
+                "2. Confidentiality: Payroll, compensation rates, and bonus distributions are classified as strictly confidential corporate trade secrets. Disclosure to unauthorized departments or external entities is strictly prohibited and subject to immediate termination."
             )
             doc2 = await repo.create_document("corp_finance", "finance_confidential.txt")
             emb2 = self.get_embedding(finance_text)
@@ -143,13 +141,13 @@ class RAGService:
         yield f"data: {json.dumps({'event': 'intent', 'intent': intent.value, 'reason': route_decision['reason']}, ensure_ascii=False)}\n\n"
         await asyncio.sleep(0.15)
 
-        # 分支 A：普通闲聊通道（0 次向量库检索，毫秒级响应）
+        # Branch A: Chitchat Channel (0 DB vector searches, instant response)
         if intent == IntentType.CHITCHAT:
             reply = (
                 "Hello! I am your Enterprise RAG Knowledge Base & Autonomous Support Agent. "
-                "You can query corporate policies (e.g., travel meal allowance, IT security regulations, annual PTO) "
-                "or request workflow task assistance!\n\n"
-                "(您好！我是企业智能知识库与业务支持 Agent，已为您挂载多租户数据隔离空间，请随时提问！)"
+                "I am equipped with multi-tenant data isolation and dynamic context pruning engines. "
+                "Feel free to query corporate policies (e.g., travel meal allowances, IT security standards, annual PTO benefits) "
+                "or issue workflow automation directives!"
             )
             for char in reply:
                 yield f"data: {json.dumps({'event': 'token', 'text': char}, ensure_ascii=False)}\n\n"
@@ -157,15 +155,14 @@ class RAGService:
             yield f"data: {json.dumps({'event': 'done', 'references': []}, ensure_ascii=False)}\n\n"
             return
 
-        # 分支 B：业务办理与动作指令通道 (Agent Tool Calling)
+        # Branch B: Action Directive & Tool Calling Channel (Agent Tool Calling)
         if intent == IntentType.ACTION_TOOL:
             reply = (
-                f"【Agent Workflow Ticket Initiated / 业务工单已受理】:\n"
-                f"- Request Directive / 操作指令: {query}\n"
-                f"- Tenant Scope / 归属租户空间: [{tenant_id}]\n"
-                f"- Ticket Reference / 系统工单号: #REQ-2026-9042\n"
-                f"- Execution Status / 当前状态: Automated draft generated and submitted to corporate OA approval queue. "
-                f"(已自动生成草案单并推送至 OA 审批待办队列，请稍后查收通知！)"
+                f"【Agent Workflow Directive Initiated】:\n"
+                f"- Request Directive: {query}\n"
+                f"- Tenant Scope: [{tenant_id}]\n"
+                f"- Reference Ticket ID: #REQ-2026-9042\n"
+                f"- Execution Status: Automated draft generated and submitted to corporate OA approval queue. Please check your notification feed shortly."
             )
             for char in reply:
                 yield f"data: {json.dumps({'event': 'token', 'text': char}, ensure_ascii=False)}\n\n"
@@ -174,27 +171,27 @@ class RAGService:
             return
 
         # ==========================================
-        # 步骤 2：知识库多租户向量检索 (pgvector)
+        # Step 2: Multi-Tenant Vector Retrieval (pgvector)
         # ==========================================
         query_vec = self.get_embedding(query)
         async with db_session.AsyncSessionLocal() as session:
             repo = VectorRepository(session)
             retrieved_docs = await repo.search_similar_chunks(tenant_id=tenant_id, query_vector=query_vec, top_k=2)
 
-        yield f"data: {json.dumps({'event': 'retrieving', 'message': f'Retrieved {len(retrieved_docs)} candidate evidence chunks under tenant [{tenant_id}] (在租户空间检索到 {len(retrieved_docs)} 条候选证据)...'}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'event': 'retrieving', 'message': f'Retrieved {len(retrieved_docs)} candidate evidence chunks under tenant [{tenant_id}]...'}, ensure_ascii=False)}\n\n"
         await asyncio.sleep(0.15)
 
         raw_contexts = [d["text"] for d in retrieved_docs]
 
         # ==========================================
-        # 步骤 3：上下文降噪与 Token 压缩 (借鉴 context-mode)
+        # Step 3: Context Pruning & Compression (Inspired by context-mode)
         # ==========================================
         compressed_context, comp_stats = ContextCompressor.compress(query, raw_contexts)
         yield f"data: {json.dumps({'event': 'compression', 'stats': comp_stats}, ensure_ascii=False)}\n\n"
         await asyncio.sleep(0.15)
 
         # ==========================================
-        # 步骤 4：置信度阈值判定 (防幻觉与外网无关问题拦截)
+        # Step 4: Confidence Guardrails (Hallucination & Out-of-Domain Interception)
         # ==========================================
         SIMILARITY_THRESHOLD = 0.25
         top_match = retrieved_docs[0] if retrieved_docs else None
@@ -202,14 +199,11 @@ class RAGService:
 
         if not is_confident:
             answer_content = (
-                f"【Knowledge Base Notice / 知识库未命中提示】:\n"
-                f"No matching enterprise policies or records were found for \"{query}\" under tenant space [{tenant_id}]. "
-                f"(在您的租户空间 [{tenant_id}] 下未检索到与“{query}”相关的企业内部规章制度。)\n\n"
-                f"💡 Architecture & Guardrail Insights (架构说明):\n"
-                f"1. **Private Intranet Guardrails (企业内网边界)**: This system guards private corporate records. "
-                f"Queries regarding public Internet topics (e.g., \"Baidu\", \"Bank of China\") are strictly rejected due to absence in the corporate document store, eliminating LLM hallucinations (杜绝大模型无中生有与虚构假事实).\n"
-                f"2. **Cross-Lingual Multilingual Retrieval (跨语言向量召回)**: Running under local mock embedding mode. "
-                f"To query English/Chinese documents across Japanese/English/Chinese, provide a `GEMINI_API_KEY` in your `.env` file to activate Gemini's dense multilingual embedding model."
+                f"【Knowledge Base Out-of-Domain Notice】:\n"
+                f"No matching enterprise policies or records were found for \"{query}\" under tenant space [{tenant_id}].\n\n"
+                f"💡 Architecture & Guardrail Insights:\n"
+                f"1. **Private Intranet Guardrails**: This system guards private corporate records. Queries regarding public Internet topics (e.g., public search engines, external commercial banks) are strictly rejected due to absence in the corporate document store, eliminating LLM hallucinations.\n"
+                f"2. **Dense Vector Embeddings**: Running under local mock embedding mode. To enable semantic vector querying across multilingual documents, provide a `GEMINI_API_KEY` in your `.env` to activate Gemini's dense embedding model."
             )
             for char in answer_content:
                 payload = {"event": "token", "text": char}
@@ -219,18 +213,18 @@ class RAGService:
             return
 
         # ==========================================
-        # 步骤 5：增强生成与流式打字机输出
+        # Step 5: Augmented Generation & SSE Streaming
         # ==========================================
         if self.has_real_key and self.client:
             prompt = f"""You are a professional Enterprise Internal Knowledge Base AI Assistant.
 Answer the user's question accurately and strictly based on the provided reference contexts below.
-If the reference material does not contain the answer, explicitly state "The enterprise knowledge base does not contain relevant information / 知识库中未找到相关规定". Do not hallucinate or make up information.
-Respond primarily in English, followed by a Chinese translation or summary if helpful.
+If the reference material does not contain the answer, explicitly state "The enterprise knowledge base does not contain relevant information regarding your query." Do not hallucinate or fabricate facts.
+Respond clearly and concisely in professional English.
 
-[Core Reference Context / 核心证据]:
+[Core Reference Context]:
 {compressed_context}
 
-[User Query / 用户问题]:
+[User Query]:
 {query}
 
 Please formulate your response:"""
@@ -244,11 +238,11 @@ Please formulate your response:"""
                     yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     await asyncio.sleep(0.01)
         else:
-            # 教学模拟打字机流式输出
+            # Teaching / Local Mock Typewriter Stream
             answer_content = (
-                f"【Multi-Tenant Verified Response / 多租户与降噪流式回答】:\n"
+                f"【Multi-Tenant Verified Response】:\n"
                 f"Verified records under tenant scope [{tenant_id}] "
-                f"(Context pruning pruned {comp_stats['saved_pct']} redundant tokens / 上下文精简已裁剪 {comp_stats['saved_pct']}):\n\n"
+                f"(Pruned {comp_stats['saved_pct']} redundant tokens via Context Compressor):\n\n"
                 f"{compressed_context}"
             )
             for char in answer_content:

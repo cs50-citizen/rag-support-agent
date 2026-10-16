@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -11,15 +11,36 @@ from app.models.schema import User
 router = APIRouter(prefix="/auth", tags=["Authentication & RBAC"])
 
 class UserRegisterRequest(BaseModel):
-    username: str = Field(..., example="alice_admin", description="用户名")
-    email: str = Field(..., example="alice@enterprise.com", description="工作邮箱")
-    password: str = Field(..., min_length=6, example="Admin123!", description="密码")
-    role: str = Field("staff", example="admin", description="角色: admin / staff")
-    tenant_id: str = Field("tenant_default", example="corp_finance", description="归属租户空间")
+    username: str = Field(
+        ...,
+        json_schema_extra={"example": "alice_admin"},
+        description="Unique username"
+    )
+    email: str = Field(
+        ...,
+        json_schema_extra={"example": "alice@enterprise.com"},
+        description="Corporate email address"
+    )
+    password: str = Field(
+        ...,
+        min_length=6,
+        json_schema_extra={"example": "Admin123!"},
+        description="User password"
+    )
+    role: str = Field(
+        "staff",
+        json_schema_extra={"example": "admin"},
+        description="RBAC Role: 'admin' or 'staff'"
+    )
+    tenant_id: str = Field(
+        "tenant_default",
+        json_schema_extra={"example": "tenant_default"},
+        description="Tenant space binding"
+    )
 
 class UserLoginRequest(BaseModel):
-    username: str = Field(..., example="alice_admin")
-    password: str = Field(..., example="Admin123!")
+    username: str = Field(..., json_schema_extra={"example": "alice_admin"})
+    password: str = Field(..., json_schema_extra={"example": "Admin123!"})
 
 class UserResponse(BaseModel):
     id: int
@@ -29,33 +50,31 @@ class UserResponse(BaseModel):
     tenant_id: str
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
 
-
-@router.post("/register", response_model=UserResponse, summary="用户注册 (绑定租户与角色)")
+@router.post("/register", response_model=UserResponse, summary="User Registration (Tenant & Role Binding)")
 async def register(req: UserRegisterRequest, db: AsyncSession = Depends(get_db)):
     """
-    ## 企业用户注册接口
-    - 创建新用户
-    - 绑定到对应的租户空间 (`tenant_id`)
-    - 分配 RBAC 权限角色 (`admin` / `staff`)
+    ## Enterprise User Registration Endpoint
+    - Registers a new user account
+    - Binds user to target tenant isolation scope (`tenant_id`)
+    - Assigns RBAC security role (`admin` / `staff`)
     """
     repo = UserRepository(db)
 
-    # 检查用户名和邮箱唯一性
+    # Check username and email uniqueness
     existing_user = await repo.get_by_username(req.username)
     if existing_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名已被占用")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already taken")
 
     existing_email = await repo.get_by_email(req.email)
     if existing_email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="邮箱已被注册")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
     user = await repo.create_user(
         username=req.username,
@@ -66,24 +85,22 @@ async def register(req: UserRegisterRequest, db: AsyncSession = Depends(get_db))
     )
     return user
 
-
-@router.post("/login", response_model=TokenResponse, summary="用户登录 (签发 JWT Token)")
+@router.post("/login", response_model=TokenResponse, summary="User Login (JWT Token Issuance)")
 async def login(req: UserLoginRequest, db: AsyncSession = Depends(get_db)):
     """
-    ## 用户登录鉴权接口
-    - 验证用户名与 bcrypt 加盐哈希密码
-    - 签发包含 `sub`, `role`, `tenant_id` 的标准 JWT Access Token
+    ## User Authentication & JWT Issuance Endpoint
+    - Verifies username against bcrypt-salted password hash
+    - Issues signed JWT access token containing `sub`, `role`, and `tenant_id`
     """
     repo = UserRepository(db)
     user = await repo.authenticate(req.username, req.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户名或密码错误",
+            detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"}
         )
 
-    # 构造 JWT Payload
     token_payload = {
         "sub": str(user.id),
         "username": user.username,
@@ -98,12 +115,10 @@ async def login(req: UserLoginRequest, db: AsyncSession = Depends(get_db)):
         "user": user
     }
 
-
-@router.get("/me", response_model=UserResponse, summary="获取当前登录用户画像 (依赖 JWT 验证)")
+@router.get("/me", response_model=UserResponse, summary="Get Current User Profile (JWT Protected)")
 async def get_my_profile(current_user: User = Depends(get_current_user)):
     """
-    ## 个人信息查询端点
-    受 JWT 保护，提取 Token 中绑定的角色与所属企业租户
+    ## Current User Identity Endpoint
+    Protected by JWT authentication; extracts role and tenant scope from verified token claims.
     """
     return current_user
-

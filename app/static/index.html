@@ -26,11 +26,11 @@
     function App() {
       // State Management
       const [tenantId, setTenantId] = useState("tenant_default");
-      const [user, setUser] = useState({ username: "Enterprise Admin / 管理员", role: "admin", token: "" });
+      const [user, setUser] = useState({ username: "Enterprise Admin", role: "admin", token: "" });
       const [messages, setMessages] = useState([
         {
           sender: "agent",
-          text: "Hello! I am your Enterprise RAG Knowledge Base & Autonomous Support Agent. The system is fully initialized with multi-tenant data isolation and context pruning enabled. Feel free to query corporate policies or upload documents!\n\n(您好！我是企业智能知识库与业务支持 Agent。系统已就绪，已挂载多租户隔离与上下文降噪引擎，请随时提问或上传文档！)",
+          text: "Hello! I am your Enterprise RAG Knowledge Base & Autonomous Support Agent. The system is active with multi-tenant data isolation and dynamic context pruning enabled. Feel free to query corporate policies or upload documents!",
           intent: "CHITCHAT",
           references: []
         }
@@ -146,7 +146,7 @@
         } catch (error) {
           setMessages(prev => {
             const updated = [...prev];
-            updated[updated.length - 1].text = `Connection failed / 连接失败: ${error.message}`;
+            updated[updated.length - 1].text = `Connection failed: ${error.message}`;
             updated[updated.length - 1].isThinking = false;
             return updated;
           });
@@ -159,7 +159,7 @@
       const handleUpload = async () => {
         if (!docTitle.trim() || !docContent.trim() || isUploading) return;
         setIsUploading(true);
-        setTaskProgress({ state: "PENDING", progress: 5, step: "Submitting to Celery task queue / 正在提交至任务队列..." });
+        setTaskProgress({ state: "PENDING", progress: 5, step: "Submitting to Celery task queue..." });
 
         try {
           const res = await fetch("/api/v1/documents/upload", {
@@ -176,7 +176,7 @@
           });
 
           if (res.status !== 202) {
-            throw new Error(`Upload failed with status / 上传失败: ${res.status}`);
+            throw new Error(`Upload failed with status code: ${res.status}`);
           }
 
           const { task_id } = await res.json();
@@ -189,7 +189,7 @@
               setTaskProgress({
                 state: taskData.state,
                 progress: taskData.progress || 50,
-                step: taskData.step || "Processing / 处理中..."
+                step: taskData.step || "Processing..."
               });
 
               if (taskData.state === "SUCCESS" || taskData.state === "FAILURE") {
@@ -202,7 +202,7 @@
                     ...prev,
                     {
                       sender: "agent",
-                      text: `🎉 Document 《${docTitle}》 has been ingested & indexed asynchronously via Celery! Vector embeddings are ready for querying.\n(文档《${docTitle}》已由 Celery 异步切片完成入库，现可开始就该文档提问！)`,
+                      text: `🎉 Document 《${docTitle}》 has been ingested & indexed asynchronously via Celery! Vector embeddings are ready for querying.`,
                       intent: "KNOWLEDGE_QUERY",
                       references: []
                     }
@@ -215,7 +215,7 @@
             }
           }, 800);
         } catch (err) {
-          alert(`Upload error / 上传失败: ${err.message}`);
+          alert(`Upload error: ${err.message}`);
           setIsUploading(false);
           setTaskProgress(null);
         }
@@ -232,44 +232,44 @@
               </div>
               <div>
                 <h1 className="font-bold text-sm tracking-wide text-white">Enterprise RAG</h1>
-                <p className="text-[11px] text-slate-400">Multi-Tenant Agent Platform / 多租户系统</p>
+                <p className="text-[11px] text-slate-400">Multi-Tenant Agent Platform</p>
               </div>
             </div>
 
             {/* Tenant Scope Selector */}
             <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
               <label className="text-xs font-semibold text-slate-300 block mb-2">
-                Tenant Isolation Scope / 租户数据隔离空间
+                Tenant Isolation Scope
               </label>
               <select
                 value={tenantId}
                 onChange={e => setTenantId(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 text-xs rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="tenant_default">🏢 Corporate Public / 通用公开制度 (tenant_default)</option>
-                <option value="corp_finance">💰 Confidential Finance / 财务绝密空间 (corp_finance)</option>
-                <option value="corp_tech">💻 Engineering & Tech / 研发规范空间 (corp_tech)</option>
+                <option value="tenant_default">🏢 Corporate Public (tenant_default)</option>
+                <option value="corp_finance">💰 Confidential Finance (corp_finance)</option>
+                <option value="corp_tech">💻 Engineering & Tech (corp_tech)</option>
               </select>
               <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
-                🔒 pgvector enforces strict row-level isolation by <code>tenant_id</code> to safeguard corporate confidential data (严格物理/逻辑隔离，杜绝越权泄露).
+                🔒 pgvector enforces strict row-level isolation by <code>tenant_id</code> to safeguard corporate confidential data.
               </p>
             </div>
 
             {/* Celery Async Upload Panel */}
             <div className="flex-1 bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col space-y-3 overflow-y-auto">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-200">⚡ Async Ingestion / 异步入库 (Celery)</span>
+                <span className="text-xs font-bold text-slate-200">⚡ Async Ingestion (Celery)</span>
                 <span className="text-[10px] bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded-full border border-blue-700 font-mono">HTTP 202</span>
               </div>
               <input
                 type="text"
-                placeholder="Document Title / 文档标题 (e.g. travel_policy.txt)"
+                placeholder="Document Title (e.g. travel_policy.txt)"
                 value={docTitle}
                 onChange={e => setDocTitle(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 text-xs rounded-lg p-2 text-white focus:outline-none focus:border-blue-500"
               />
               <textarea
-                placeholder="Paste corporate policy contents (automatic chunking & vector indexing pipeline)... / 粘贴企业规章长文本..."
+                placeholder="Paste corporate policy contents (automatic chunking & vector indexing pipeline)..."
                 value={docContent}
                 onChange={e => setDocContent(e.target.value)}
                 rows={4}
@@ -284,7 +284,7 @@
                     : "bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/30"
                 }`}
               >
-                <span>{isUploading ? "Ingesting in Background / 任务排队中..." : "Submit to Celery / 提交异步入库"}</span>
+                <span>{isUploading ? "Ingesting in Background..." : "Submit to Celery Pipeline"}</span>
               </button>
 
               {/* Task Progress Bar */}
@@ -322,11 +322,11 @@
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                 </span>
                 <span className="text-xs font-semibold text-slate-300">
-                  Active Tenant Space / 当前空间: <span className="text-blue-400 font-mono">[{tenantId}]</span>
+                  Active Tenant Space: <span className="text-blue-400 font-mono">[{tenantId}]</span>
                 </span>
               </div>
               <div className="flex items-center space-x-2">
-                <span className="text-xs text-slate-400">User / 身份: <b>{user.username}</b></span>
+                <span className="text-xs text-slate-400">User: <b>{user.username}</b></span>
                 <span className="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-700 px-2 py-0.5 rounded font-mono">
                   {user.role}
                 </span>
@@ -358,14 +358,14 @@
                               ? "bg-amber-950 text-amber-300 border border-amber-800"
                               : "bg-blue-950 text-blue-300 border border-blue-800"
                           }`}>
-                            {msg.intent === "CHITCHAT" && "💬 Direct Chitchat (0 DB queries) / 快速闲聊"}
-                            {msg.intent === "ACTION_TOOL" && "⚡ Agent Workflow Ticket / 业务办理工单"}
-                            {msg.intent === "KNOWLEDGE_QUERY" && "📚 Knowledge Vector Retrieval / 知识库向量检索"}
+                            {msg.intent === "CHITCHAT" && "💬 Direct Chitchat (0 DB queries)"}
+                            {msg.intent === "ACTION_TOOL" && "⚡ Agent Workflow Ticket"}
+                            {msg.intent === "KNOWLEDGE_QUERY" && "📚 Knowledge Vector Retrieval"}
                           </span>
                         )}
                         {msg.compression && (
                           <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-semibold">
-                            🚀 Context Pruning: Saved {msg.compression.saved_pct} Redundant Tokens / 已精简
+                            🚀 Context Pruning: Saved {msg.compression.saved_pct} Redundant Tokens
                           </span>
                         )}
                       </div>
@@ -381,7 +381,7 @@
                     {msg.references && msg.references.length > 0 && (
                       <div className="mt-3 pt-2.5 border-t border-slate-700/60 text-xs">
                         <span className="text-slate-400 font-semibold block mb-1">
-                          📖 Evidence References / 溯源引用资料:
+                          📖 Evidence References:
                         </span>
                         <div className="flex flex-wrap gap-1.5">
                           {msg.references.map((ref, idx) => (
@@ -389,7 +389,7 @@
                               key={idx}
                               className="bg-slate-900 border border-slate-700 px-2 py-1 rounded text-slate-300 text-[11px]"
                             >
-                              📄 {ref.source} (Confidence / 置信度: {ref.score})
+                              📄 {ref.source} (Confidence: {ref.score})
                             </span>
                           ))}
                         </div>
@@ -404,25 +404,25 @@
             {/* Quick Interactive Prompt Chips */}
             <div className="px-6 py-2 border-t border-slate-800/50 flex space-x-2 overflow-x-auto text-xs">
               <span className="text-slate-400 self-center text-[11px] whitespace-nowrap">
-                💡 Quick Prompts / 快捷测试:
+                💡 Quick Prompts:
               </span>
               <button
-                onClick={() => handleSend("What is the daily meal allowance for business trips to Tier-1 cities like Shanghai? (去上海出差的一天餐饮补贴是多少？)")}
+                onClick={() => handleSend("What is the daily meal allowance for business trips to Tier-1 metropolitan areas?")}
                 className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 py-1 rounded-full whitespace-nowrap transition"
               >
-                Travel Meal Allowance / 出差餐饮补贴
+                Travel Meal Allowance
               </button>
               <button
-                onClick={() => handleSend("Submit an official request for next Wednesday's paid annual leave (帮我申请下周三的带薪年假休假审批)")}
+                onClick={() => handleSend("Submit an official request for next Wednesday's paid annual leave approval")}
                 className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 py-1 rounded-full whitespace-nowrap transition"
               >
-                PTO Leave Approval / 申请请假工单 (Agent Action)
+                PTO Leave Approval (Agent Action)
               </button>
               <button
-                onClick={() => handleSend("What is the year-end bonus calculation base for corporate finance? (请问财务年终奖发放细则和计算基数是多少？)")}
+                onClick={() => handleSend("What is the annual bonus calculation base for corporate finance?")}
                 className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 px-3 py-1 rounded-full whitespace-nowrap transition"
               >
-                Finance Bonus / 财务年终奖 (Tenant Isolation Check)
+                Finance Bonus (Tenant Isolation Check)
               </button>
             </div>
 
@@ -439,7 +439,7 @@
                   type="text"
                   value={inputQuery}
                   onChange={e => setInputQuery(e.target.value)}
-                  placeholder="Ask corporate policies or issue workflow directives (supports real-time SSE streaming)... / 向知识库提问或下达业务指令..."
+                  placeholder="Ask corporate policies or issue workflow directives (supports real-time SSE streaming)..."
                   disabled={isStreaming}
                   className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                 />
@@ -452,7 +452,7 @@
                       : "bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/30"
                   }`}
                 >
-                  {isStreaming ? "Streaming / 生成中..." : "Send / 发送"}
+                  {isStreaming ? "Streaming..." : "Send"}
                 </button>
               </form>
             </div>
